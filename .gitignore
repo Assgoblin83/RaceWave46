@@ -4,6 +4,8 @@
 /b-*/
 /out/
 /dist/
+/export/
+/*.flatpak
 
 # Flatpak builder state and the build-time ROM copy
 /.flatpak-builder/

@@ -1,0 +1,213 @@
+# Distributable RaceWave46 package: the host, the recompilers and the Clang
+# toolchain, but no ROM-derived code. The player selects their own Wave Race 64
+# USA Rev 1 cartridge on first start and the game module is built locally.
+#
+# app-id is the fork's package id. build.sh --app-id can rewrite it, and
+# --distributable selects this manifest. The upstream manifest
+# (io.github.DomazinUS.RaceWave46.yml) is unchanged and still builds the
+# package that embeds code generated from the supplied ROM.
+app-id: io.github.Assgoblin83.RaceWave46
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.llvm22
+command: racewave46
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # GPU access, and gamepads plus rumble: there is no portal for game
+  # controllers yet, so SDL needs the evdev/hidraw device nodes.
+  - --device=all
+  - --socket=pulseaudio
+  # RetroAchievements sign-in, progress and badge images.
+  - --share=network
+  # Match the game's SDL window to this application's desktop entry.
+  - --env=SDL_APP_ID=io.github.Assgoblin83.RaceWave46
+  - --env=SDL_VIDEO_WAYLAND_WMCLASS=io.github.Assgoblin83.RaceWave46
+  - --env=SDL_VIDEO_X11_WMCLASS=io.github.Assgoblin83.RaceWave46
+  # The in-app game module builder finds the recipe, headers and the ABI
+  # source here, and Clang's system headers in this order: libstdc++ (and its
+  # per-target bits) before glibc, exactly as a native driver would.
+  - --env=WR64_GAME_SOURCE_ROOT=/app/share/racewave46
+  - >-
+    --env=WR64_GAME_SYSTEM_INCLUDE_DIRS=/app/share/racewave46/sysroot/c++/16.2.0:/app/share/racewave46/sysroot/c++/16.2.0/x86_64-unknown-linux-gnu:/app/share/racewave46/sysroot/include:/app/share/racewave46/sysroot/include/x86_64-linux-gnu
+  # No file system access: the ROM is chosen through the FileChooser portal,
+  # the RetroAchievements login is kept through the Secret portal and links
+  # open through the OpenURI portal.
+
+build-options:
+  append-path: /usr/lib/sdk/llvm22/bin:/usr/lib/sdk/rust-stable/bin
+  env:
+    CC: clang
+    CXX: clang++
+
+modules:
+  # librashader, loaded by the game from its own directory for the librashader
+  # enhancement. Only the Vulkan runtime is built; see tools/build_librashader.sh.
+  - name: librashader
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/librashader/cargo
+        CARGO_NET_OFFLINE: 'true'
+    build-commands:
+      - cargo --offline build --locked --package librashader-capi --profile optimized
+          --no-default-features --features runtime-vulkan
+      - install -Dm755 target/optimized/liblibrashader_capi.so /app/lib/racewave46/librashader.so
+      - install -Dm644 LICENSE.md /app/share/licenses/io.github.Assgoblin83.RaceWave46/librashader-LICENSE.md
+    sources:
+      - type: archive
+        url: https://github.com/SnowflakePowered/librashader/archive/refs/tags/librashader-v0.12.0.tar.gz
+        sha256: 4bf8cf2489d00848dcabbf2163204093776082da4217d5a5db45e4cbf335cedf
+      # Generated from the archive's Cargo.lock with flatpak-cargo-generator.
+      - librashader-cargo-sources.json
+
+  # N64Recomp and RSPRecomp run as subprocesses inside the sandbox. The game
+  # module is generated from the player's ROM by the host at first start.
+  - name: n64recomp
+    buildsystem: simple
+    build-commands:
+      - cmake -S . -B _build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - cmake --build _build --target N64RecompCLI RSPRecomp
+          --parallel "${FLATPAK_BUILDER_N_JOBS}"
+      - install -d /app/lib/racewave46/tools
+      - install -Dm755 _build/N64Recomp -t /app/lib/racewave46/tools
+      - install -Dm755 _build/RSPRecomp -t /app/lib/racewave46/tools
+    sources:
+      - type: dir
+        path: ../../../lib/N64ModernRuntime/N64Recomp
+        skip:
+          - .git
+
+  - name: racewave46
+    buildsystem: simple
+    build-commands:
+      # The host is built without ROM-derived code; the game module is built
+      # at runtime from the player's cartridge.
+      - >-
+        cmake -S . -B build-flatpak -G Ninja
+        -DCMAKE_BUILD_TYPE=Release
+        -DWR64_ENABLE_RT64=ON
+        -DWR64_ENABLE_FRONTEND=ON
+        -DWR64_ENABLE_DIAGNOSTICS=OFF
+        -DWR64_GAME_MODULE=ON
+        -DWR64_BUNDLE_LIBRASHADER=ON
+        -DWR64_LIBRASHADER_LIBRARY=/app/lib/racewave46/librashader.so
+        -DRT64_WR64_VULKAN_DXC="${PWD}/dxc-1.9.2607/bin/dxc"
+        -DWR64_DXC_TOOLCHAIN_DIRECTORY="${PWD}/dxc-1.8.2502/bin"
+        -DPython3_EXECUTABLE="$(command -v python3)"
+      - cmake --build build-flatpak --target WaveRace64Recompiled
+          --parallel "${FLATPAK_BUILDER_N_JOBS}"
+      - install -Dm755 build-flatpak/WaveRace64Recompiled -t /app/lib/racewave46
+      - cp -r build-flatpak/assets /app/lib/racewave46/assets
+      # The game finds its assets beside the resolved executable, so a symlink
+      # keeps them out of /app/bin.
+      - install -d /app/bin
+      - ln -s ../lib/racewave46/WaveRace64Recompiled /app/bin/racewave46
+      - install -Dm644 COPYING LICENSE THIRD-PARTY-NOTICES.md
+          -t /app/share/licenses/io.github.Assgoblin83.RaceWave46
+      # Licenses for the compiler and header trees shipped for the local build.
+      - install -Dm644
+          /usr/lib/sdk/llvm22/share/licenses/org.freedesktop.Sdk.Extension.llvm22/llvm/LICENSE.TXT
+          /app/share/licenses/io.github.Assgoblin83.RaceWave46/LLVM-LICENSE.TXT
+      - install -d /app/share/licenses/io.github.Assgoblin83.RaceWave46/gcc
+      - cp -a /usr/share/licenses/freedesktop-sdk/gcc/.
+          /app/share/licenses/io.github.Assgoblin83.RaceWave46/gcc/
+      - install -Dm644 /usr/share/licenses/freedesktop-sdk/glibc/LICENSES
+          /app/share/licenses/io.github.Assgoblin83.RaceWave46/glibc-LICENSES
+      - install -Dm644 lib/N64ModernRuntime/N64Recomp/LICENSE
+          /app/share/licenses/io.github.Assgoblin83.RaceWave46/N64Recomp-LICENSE
+      - install -Dm644 packaging/linux/io.github.DomazinUS.RaceWave46.desktop
+          -t /app/share/applications
+      - install -Dm644 packaging/linux/io.github.DomazinUS.RaceWave46.metainfo.xml
+          -t /app/share/metainfo
+      # The Windows icon is a single embedded 256x256 PNG; install that image.
+      - >-
+        python3 -c 'import struct, sys;
+        data = open("resources/WaveRace.ico", "rb").read();
+        size, offset = struct.unpack_from("<II", data, 6 + 8);
+        image = data[offset:offset + size];
+        assert image[:8] == b"\x89PNG\r\n\x1a\n";
+        open(sys.argv[1], "wb").write(image)' icon.png
+      - install -Dm644 icon.png
+          /app/share/icons/hicolor/256x256/apps/io.github.Assgoblin83.RaceWave46.png
+
+      # Clang 22 from the SDK extension. The host builder runs
+      # /app/lib/racewave46/tools/clang and puts the directory on PATH and
+      # LD_LIBRARY_PATH, so the compiler, lld and the LLVM libraries sit
+      # together. Clang resolves its builtin headers through ../lib/clang/22
+      # relative to its own directory.
+      - install -d /app/lib/racewave46/tools /app/lib/racewave46/lib/clang/22
+      - install -Dm755 /usr/lib/sdk/llvm22/bin/clang-22 /app/lib/racewave46/tools/clang-22
+      - ln -s clang-22 /app/lib/racewave46/tools/clang
+      - install -Dm755 /usr/lib/sdk/llvm22/bin/lld /app/lib/racewave46/tools/lld
+      - ln -s lld /app/lib/racewave46/tools/ld.lld
+      - install -Dm644 /usr/lib/sdk/llvm22/lib/libLLVM.so.22.1
+          /usr/lib/sdk/llvm22/lib/libclang-cpp.so.22.1
+          -t /app/lib/racewave46/tools
+      - cp -a /usr/lib/sdk/llvm22/lib/clang/22/include
+          /app/lib/racewave46/lib/clang/22/include
+
+      # Everything the generator and the module compiler read at runtime:
+      # the recipe, the checksummed inputs, the headers and the ABI source.
+      - install -d /app/share/racewave46
+      - cp -a config symbols data /app/share/racewave46/
+      - install -d /app/share/racewave46/include/librecomp
+          /app/share/racewave46/include/ultramodern
+          /app/share/racewave46/src/game_module
+      - install -Dm644 include/wr64_game_module.h -t /app/share/racewave46/include
+      - install -Dm644 lib/N64ModernRuntime/N64Recomp/include/recomp.h
+          /app/share/racewave46/include
+      - install -Dm644 lib/N64ModernRuntime/librecomp/include/librecomp/*.hpp
+          lib/N64ModernRuntime/librecomp/include/librecomp/*.h
+          -t /app/share/racewave46/include/librecomp
+      - install -Dm644 lib/N64ModernRuntime/ultramodern/include/ultramodern/*.h
+          -t /app/share/racewave46/include/ultramodern
+      - install -Dm644 src/game_module/wr64_game_module_abi.cpp
+          -t /app/share/racewave46/src/game_module
+
+      # Compiler headers for the module build. The libstdc++ and glibc include
+      # trees are taken from the SDK. /usr/include keeps its
+      # x86_64-linux-gnu -> ../lib/x86_64-linux-gnu/include symlink, so the
+      # matching directory is installed under sysroot/lib.
+      - >-
+        bash -c 'set -eu;
+        sysroot=/app/share/racewave46/sysroot;
+        mkdir -p "$sysroot/include" "$sysroot/lib/x86_64-linux-gnu/include" "$sysroot/c++";
+        for entry in /usr/include/*; do
+        case "$entry" in */c++) continue;; esac;
+        cp -a "$entry" "$sysroot/include/";
+        done;
+        cp -a /usr/lib/x86_64-linux-gnu/include/. "$sysroot/lib/x86_64-linux-gnu/include/";
+        cp -a /usr/include/c++/16.2.0 "$sysroot/c++/"'
+    sources:
+      - type: dir
+        path: ../../..
+        skip:
+          - .git
+          - .github
+          - .flatpak-builder
+          - .flatpak-input
+          - .local
+          - build
+          - build-module
+          - build-tools
+          - build-flatpak
+          - RecompiledFuncsPoint0
+          - rsp
+          - tests
+      # Pinned Microsoft DXC releases for the shaders (see tools/prepare_dxc.cmake
+      # and lib/rt64/cmake/wr64_vulkan_shaders.cmake).
+      - type: archive
+        url: https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2502/linux_dxc_2025_02_20.x86_64.tar.gz
+        sha256: e0580d90dbf6053a783ddd8d5153285f0606e5deaad17a7a6452f03acdf88c71
+        strip-components: 0
+        dest: dxc-1.8.2502
+      - type: archive
+        url: https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2607/linux_dxc_2026_07_29.x86_x64.tar.gz
+        sha256: 55665c87824051ed4774ff3280a79ccbbb7d39243b9736ca5e98222134112d54
+        dest: dxc-1.9.2607

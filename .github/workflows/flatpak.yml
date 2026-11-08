@@ -1,0 +1,71 @@
+name: Flatpak
+
+# Builds the distributable Flatpak (host plus toolchain, no ROM-derived code)
+# and attaches it to the GitHub release for the tag. Run manually to try a
+# build without publishing.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  flatpak:
+    name: Distributable Flatpak
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install flatpak and the Freedesktop SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          # Ubuntu 24.04 restricts unprivileged user namespaces; bwrap (and so
+          # flatpak-builder) needs them.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          flatpak --user remote-add --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --noninteractive flathub \
+            org.freedesktop.Sdk//26.08 \
+            org.freedesktop.Platform//26.08 \
+            org.freedesktop.Sdk.Extension.llvm22//26.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//26.08
+
+      - name: Build the distributable Flatpak
+        run: |
+          packaging/linux/flatpak/build.sh --distributable --no-install \
+            --app-id io.github.Assgoblin83.RaceWave46 -- --disable-rofiles-fuse
+
+      - name: Check that no ROM-derived code is packaged
+        run: python3 tools/check_flatpak_contents.py build-flatpak --expect-runtime
+
+      - name: Bundle the Flatpak
+        run: |
+          flatpak build-export export build-flatpak master
+          flatpak build-bundle \
+            --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            export RaceWave46-x86_64.flatpak \
+            io.github.Assgoblin83.RaceWave46 master
+          ls -l RaceWave46-x86_64.flatpak
+
+      - name: Upload the Flatpak to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 ||
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
+          gh release upload "${GITHUB_REF_NAME}" RaceWave46-x86_64.flatpak --clobber
+
+      - name: Keep the Flatpak as a workflow artifact
+        if: github.event_name == 'workflow_dispatch'
+        # TODO: pin to a commit SHA once one is chosen for this repository.
+        uses: actions/upload-artifact@v4
+        with:
+          name: RaceWave46-x86_64-flatpak
+          path: RaceWave46-x86_64.flatpak
+          if-no-files-found: error

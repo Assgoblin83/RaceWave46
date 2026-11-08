@@ -71,7 +71,7 @@ To run a test suite, use `./BUILD-TEST.sh --suite achievements_platform`; `--usa
 
 ## Flatpak
 
-`packaging/linux` contains a Flatpak for the Freedesktop 26.08 runtime. It starts the game directly; on the first start, choose the ROM with **Select USA ROM** in the main menu, exactly as on Windows. Once a valid ROM is stored, the option reads **Start Game**.
+`packaging/linux` contains a Flatpak for the Freedesktop 26.08 runtime. It starts the game directly; on the first start, choose the ROM with **Select USA ROM** in the main menu, exactly as on Windows. The development package embeds code generated at build time, so the option reads **Start Game** immediately. The distributable package below builds the module from the player's ROM at first start instead.
 
 Build and install it for the current user with `flatpak` and `flatpak-builder` installed:
 
@@ -85,3 +85,22 @@ The script installs the Freedesktop SDK and its Rust and LLVM extensions from Fl
 The sandbox has no file system access. Its profile is `~/.var/app/io.github.DomazinUS.RaceWave46/data/racewave46`. It uses the FileChooser and Documents portals for the ROM, the Secret portal for the RetroAchievements login, and the OpenURI portal for links and the mods folder. It requests network access for RetroAchievements, Wayland/X11, PulseAudio and `--device=all`; the last is needed because no portal exposes game controllers and rumble yet.
 
 The manifest builds librashader from its pinned source release, with only the Vulkan runtime, and installs it beside the game. Its Rust dependencies come from `librashader-cargo-sources.json`; after changing the librashader version, regenerate that file from the release archive's `Cargo.lock` with flatpak-cargo-generator and update the archive hash here, in `tools/build_librashader.sh` and in `tools/prepare_librashader.cmake`.
+
+### Distributable Flatpak
+
+`packaging/linux/flatpak/io.github.Assgoblin83.RaceWave46.distributable.yml` builds the package that can be published. It contains the host, librashader, N64Recomp, RSPRecomp, Clang/LLD and the headers needed to compile the game module, but no ROM and no ROM-derived code. The player selects their own cartridge on first start; **Prepare Game** recompiles and compiles the module locally (about a minute on four cores) and stores it under the profile's `game-module` directory.
+
+```sh
+packaging/linux/flatpak/build.sh --distributable --no-install \
+    --app-id io.github.Assgoblin83.RaceWave46
+python3 tools/check_flatpak_contents.py build-flatpak --expect-runtime
+flatpak build-export export build-flatpak master
+flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+    export RaceWave46-x86_64.flatpak io.github.Assgoblin83.RaceWave46 master
+```
+
+`--app-id` generates matching desktop, metainfo, icon and manifest copies in `.flatpak-input/appid`; the checked-in files keep the upstream id. `--rom` is rejected with `--distributable`.
+
+The build log for the in-app preparation is written to `game-module/game-module-build.log` in the profile (normally `~/.var/app/io.github.Assgoblin83.RaceWave46/data/racewave46`). A failed preparation shows the reason in the dialog and leaves that log for diagnosis; **Prepare Game** can be retried.
+
+`.github/workflows/flatpak.yml` builds this package on every `v*` tag and attaches the bundle to the GitHub release. It can also be started manually, in which case the bundle is kept as a workflow artifact. The workflow runs the content check before uploading.
