@@ -28,6 +28,10 @@ std::string canonical_digest(std::string_view text);
 // place. Returns false with a descriptive error if an anchor has changed.
 bool finalize(const std::filesystem::path& directory, std::string& error);
 
+// Applies tools/patch_rsp_dispatch.cmake's edit to the freshly generated
+// rsp/aspMain.cpp in place.
+bool patch_rsp_dispatch(const std::filesystem::path& path, std::string& error);
+
 // Checks that the directory holds exactly the recipe's files and that every
 // canonical digest matches.
 bool verify_generated(const std::filesystem::path& directory, const Recipe& recipe,

@@ -384,7 +384,16 @@ add_executable(WaveRace64Recompiled
 if(NOT WR64_GAME_MODULE)
     target_sources(WaveRace64Recompiled PRIVATE "${PATCHED_RSP_SOURCE}")
 else()
-    target_sources(WaveRace64Recompiled PRIVATE src/wr64_game_module.cpp)
+    target_sources(WaveRace64Recompiled PRIVATE
+        src/wr64_game_module.cpp
+        src/wr64_game_builder.cpp
+        src/wr64_game_prepare.cpp
+        src/wr64_generation.cpp
+        src/wr64_sha256.cpp
+    )
+    target_include_directories(WaveRace64Recompiled PRIVATE
+        lib/N64ModernRuntime/thirdparty
+    )
     target_compile_definitions(WaveRace64Recompiled PRIVATE
         WR64_GAME_MODULE=1
         WR64_ENTRYPOINT_ADDRESS=${WR64_GAME_ENTRYPOINT_ADDRESS}

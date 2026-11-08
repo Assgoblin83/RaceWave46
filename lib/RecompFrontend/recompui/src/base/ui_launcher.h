@@ -11,6 +11,16 @@
 namespace recompui {
     class GameOption;
 
+    // A project whose game code is built at runtime can require preparation
+    // between ROM selection and Start Game. Both callbacks run on the UI
+    // thread; prepare() must finish by invoking its callback there (use
+    // queue_ui_task from a worker).
+    struct GamePreparationCallbacks {
+        std::function<bool()> is_ready;
+        std::function<void(std::function<void(bool)>)> prepare;
+    };
+    void register_game_preparation_callbacks(GamePreparationCallbacks callbacks);
+
     class GameOptionsMenu : public Element {
     private:
         void select_rom(std::function<void(bool)> callback);

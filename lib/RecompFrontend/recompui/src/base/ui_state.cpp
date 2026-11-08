@@ -927,6 +927,8 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
     // Keep the selector visible while waiting for released controls on return.
     // Only interaction is suspended; rendering must not become a black screen.
 
+    recompui::process_ui_tasks();
+
     if (recompui::is_any_context_shown()) {
         if (recompui::is_context_shown(recompui::get_launcher_context_id())) {
             recompui::update_launcher_menu();

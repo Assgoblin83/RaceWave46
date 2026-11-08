@@ -58,6 +58,10 @@ namespace recompui {
 
     void queue_event(const SDL_Event& event);
     bool try_deque_event(SDL_Event& out);
+    // Runs a task on the UI thread before the next frame's context updates.
+    // Safe to call from any thread.
+    void queue_ui_task(std::function<void()> task);
+    void process_ui_tasks();
     // Suspend a host UI while another process owns interaction. Device hotplug
     // remains active; queued actions and held-key repeats are discarded.
     void set_input_suspended(bool suspended);

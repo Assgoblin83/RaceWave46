@@ -242,13 +242,25 @@ bool finalize_culling(const std::filesystem::path& path,
             "(// 0x%08X: slti[^\\n]*\\n\\s*ctx->r1 = SIGNED\\(ctx->r[56]\\) < )0X(?:1A8|140)( \\? 1 : 0;)",
             pc);
         const std::regex pattern(pattern_buffer, std::regex::ECMAScript);
-        const std::string replacement = std::string("$1") + "0X228" + "$2";
 
+        std::string replaced;
+        replaced.reserve(text.size());
+        size_t cursor = 0;
         size_t count = 0;
         for (auto it = std::sregex_iterator(text.begin(), text.end(), pattern);
             it != std::sregex_iterator(); ++it) {
+            const std::smatch& match = *it;
+            replaced.append(text, cursor,
+                static_cast<size_t>(match.position()) - cursor);
+            // Group 1 ends right before the literal, group 2 starts at the
+            // " ? 1 : 0;" suffix.
+            replaced.append(match[1].str());
+            replaced.append("0X228");
+            replaced.append(match[2].str());
+            cursor = static_cast<size_t>(match.position() + match.length());
             ++count;
         }
+        replaced.append(text, cursor, std::string::npos);
         const size_t expected = pc == single_match_pc ? 1 : 2;
         if (count != expected) {
             char message[160];
@@ -257,7 +269,7 @@ bool finalize_culling(const std::filesystem::path& path,
             error = message;
             return false;
         }
-        text = std::regex_replace(text, pattern, replacement);
+        text = std::move(replaced);
     }
     return write_file(path, text, error);
 }
@@ -408,6 +420,37 @@ bool finalize(const std::filesystem::path& directory, std::string& error) {
             return false;
         }
     }
+    return write_file(path, text, error);
+}
+
+bool patch_rsp_dispatch(const std::filesystem::path& path, std::string& error) {
+    constexpr std::string_view kNeedle =
+        "    // add         $2, $zero, $1\n"
+        "    r2 = RSP_ADD32(0, r1);\n"
+        "    // lh          $2, 0x10($2)\n"
+        "    r2 = RSP_MEM_H_LOAD(0X10, r2);\n";
+    constexpr std::string_view kReplacement =
+        "    // The ABI command table at DMEM 0x10 is immutable, but later audio\n"
+        "    // operations can alias that region in this recompilation. Dispatch directly\n"
+        "    // from the command index to prevent corrupted, unaligned jump targets.\n"
+        "    static constexpr uint16_t dispatch_targets[16] = {\n"
+        "        0x1118, 0x1470, 0x11DC, 0x1B38,\n"
+        "        0x1214, 0x187C, 0x1254, 0x12D0,\n"
+        "        0x12EC, 0x1328, 0x140C, 0x1294,\n"
+        "        0x1E24, 0x138C, 0x170C, 0x144C,\n"
+        "    };\n"
+        "    r2 = dispatch_targets[(r1 >> 1) & 0xF];\n";
+
+    std::string text;
+    if (!read_file(path, text, error)) {
+        return false;
+    }
+    const size_t position = text.find(kNeedle);
+    if (position == std::string::npos) {
+        error = "aspMain dispatch block was not found";
+        return false;
+    }
+    text.replace(position, kNeedle.size(), kReplacement);
     return write_file(path, text, error);
 }
 

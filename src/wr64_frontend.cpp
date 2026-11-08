@@ -1,5 +1,6 @@
 #include "wr64_frontend.hpp"
 #include "wr64_manual_frontend.hpp"
+#include "wr64_game_prepare.hpp"
 #include "wr64_graphics_restart.hpp"
 #include "wr64_diagnostic_policy.h"
 
@@ -614,6 +615,9 @@ void configure() {
         recompui::register_extra_font("LatoLatin-Bold.ttf");
         wr64::manual_frontend::configure_theme();
         recompui::register_launcher_init_callback(wr64::manual_frontend::create_launcher);
+#ifdef WR64_GAME_MODULE
+        wr64::game_prepare::initialize();
+#endif
 
         // Keep the current settings behavior under the manual-style widgets.
         // Create the familiar General/Controls/Graphics/Sound tabs first.

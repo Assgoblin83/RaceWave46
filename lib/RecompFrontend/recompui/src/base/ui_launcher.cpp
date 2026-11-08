@@ -38,6 +38,12 @@ static std::string generate_thumbnail_src_for_mod(const std::string &mod_id) {
 namespace recompui {
     using on_select_option_t = std::function<void(const std::string &id)>;
 
+    static GamePreparationCallbacks game_preparation_callbacks;
+
+    void register_game_preparation_callbacks(GamePreparationCallbacks callbacks) {
+        game_preparation_callbacks = std::move(callbacks);
+    }
+
     class GameModeOption : public Element {
     protected:
         std::string mode_id;
@@ -448,14 +454,34 @@ namespace recompui {
     }
 
     GameOption *GameOptionsMenu::add_start_game_or_load_rom_option(const std::string& load_rom_title, const std::string& start_game_title) {
-        GameOption *option = add_option(rom_valid ? start_game_title : load_rom_title, nullptr);
+        const std::string prepare_title = "Prepare Game";
+        const bool needs_preparation = rom_valid && game_preparation_callbacks.is_ready &&
+            !game_preparation_callbacks.is_ready();
+        GameOption *option = add_option(rom_valid
+            ? (needs_preparation ? prepare_title : start_game_title)
+            : load_rom_title, nullptr);
         option->set_as_primary_focus(true);
 
         auto context = get_current_context();
         context.set_autofocus_element(option);
 
-        option->set_callback([this, option, start_game_title]() {
+        option->set_callback([this, option, prepare_title, start_game_title]() {
             if (this->rom_valid) {
+                // The ROM is usable, but this build needs the game module
+                // generated from it before the entrypoint can run.
+                if (game_preparation_callbacks.is_ready &&
+                    !game_preparation_callbacks.is_ready()) {
+                    if (game_preparation_callbacks.prepare) {
+                        game_preparation_callbacks.prepare(
+                            [option, start_game_title](bool success) {
+                                if (success) {
+                                    option->set_title(start_game_title);
+                                    option->set_as_primary_focus(true);
+                                }
+                            });
+                    }
+                    return;
+                }
                 recompui::update_game_mod_id(this->mod_game_id);
                 if (recomp::mods::game_mode_count(this->mod_game_id, false) > 0) {
                     get_launcher_menu()->show_game_mode_menu(this->game_id, this->game_display_name, this->game_thumbnail);
@@ -464,13 +490,15 @@ namespace recompui {
                     recompui::hide_all_contexts();
                 }
             } else {
-                select_rom([this, option, start_game_title](bool success) {
+                select_rom([this, option, prepare_title, start_game_title](bool success) {
                     if (success) {
                         this->rom_valid = true;
 
                         recompui::ContextId ui_context = recompui::get_launcher_context_id();
                         bool opened = ui_context.open_if_not_already();
-                        option->set_title(start_game_title);
+                        const bool needs = game_preparation_callbacks.is_ready &&
+                            !game_preparation_callbacks.is_ready();
+                        option->set_title(needs ? prepare_title : start_game_title);
                         if (opened) {
                             ui_context.close();
                         }

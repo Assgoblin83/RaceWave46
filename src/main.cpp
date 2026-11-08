@@ -46,6 +46,7 @@
 #include "ultramodern/ultramodern.hpp"
 
 #ifdef WR64_GAME_MODULE
+#include "wr64_game_builder.hpp"
 #include "wr64_game_module.hpp"
 #else
 extern "C" void recomp_entrypoint(uint8_t* rdram, recomp_context* ctx);
@@ -245,12 +246,22 @@ int main(int argc, char** argv) {
     wr64::achievement_badges::initialize(recomp::get_config_path());
 
 #ifdef WR64_GAME_MODULE
-    const char* module_env = std::getenv("WR64_GAME_MODULE_PATH");
-    const std::filesystem::path module_path =
-        module_env != nullptr && *module_env != '\0'
-            ? std::filesystem::path{module_env}
-            : wr64::game_module::default_path();
-    if (!wr64::game_module::load(module_path)) {
+    std::filesystem::path module_path;
+    if (const char* module_env = std::getenv("WR64_GAME_MODULE_PATH");
+        module_env != nullptr && *module_env != '\0') {
+        module_path = module_env;
+    } else {
+        // A module prepared on an earlier run is picked up here so the
+        // launcher can offer Start Game straight away.
+        std::filesystem::path prepared;
+        const std::filesystem::path stored = runtime_path / (std::u8string{kGameId} + u8".z64");
+        if (wr64::game_builder::prepared(
+                wr64::game_builder::default_paths(stored, runtime_path / "game-module"),
+                prepared)) {
+            module_path = prepared;
+        }
+    }
+    if (!module_path.empty() && !wr64::game_module::load(module_path)) {
         std::fprintf(stderr, "[runtime] %s\n", wr64::game_module::last_error().c_str());
     }
 #endif

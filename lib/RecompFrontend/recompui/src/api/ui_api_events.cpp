@@ -1,3 +1,5 @@
+#include <functional>
+
 #include "concurrentqueue.h"
 
 #include "overloaded.h"
@@ -33,9 +35,21 @@ struct QueuedCallback {
 };
 
 moodycamel::ConcurrentQueue<QueuedCallback> queued_callbacks{};
+moodycamel::ConcurrentQueue<std::function<void()>> queued_ui_tasks{};
 
 void recompui::queue_ui_callback(recompui::ResourceId resource, const Event& e, const UICallback& callback) {
     queued_callbacks.enqueue(QueuedCallback{ .resource = resource, .event = e, .callback = callback });
+}
+
+void recompui::queue_ui_task(std::function<void()> task) {
+    queued_ui_tasks.enqueue(std::move(task));
+}
+
+void recompui::process_ui_tasks() {
+    std::function<void()> task;
+    while (queued_ui_tasks.try_dequeue(task)) {
+        task();
+    }
 }
 
 bool convert_event(const recompui::Event& in, RecompuiEventData& out) {
