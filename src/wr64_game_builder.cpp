@@ -641,9 +641,15 @@ Result build(const Paths& paths, const Progress& progress) {
     std::string error;
 
     std::mutex progress_mutex;
+    int reported_percent = 0;
     auto report = [&](int percent, std::string_view step) {
         if (progress.report) {
             std::lock_guard guard{progress_mutex};
+            if (percent < reported_percent) {
+                percent = reported_percent;
+            } else {
+                reported_percent = percent;
+            }
             progress.report(percent, step);
         }
     };

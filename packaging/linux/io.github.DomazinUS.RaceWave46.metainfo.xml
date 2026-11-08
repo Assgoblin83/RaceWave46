@@ -15,9 +15,10 @@
       RetroAchievements.
     </p>
     <p>
-      No game data is included. On first start you select your own unmodified Wave Race 64 USA
-      Rev 1 ROM from the main menu; it is checked and copied into the application's private
-      data, and later starts only need Start Game.
+      No game data or code generated from it is included. On first start you select your own
+      unmodified Wave Race 64 USA Rev 1 ROM from the main menu. The application recompiles and
+      compiles the game code locally, showing progress, and keeps the result in its private data
+      directory. Later starts only need Start Game.
     </p>
   </description>
   <launchable type="desktop-id">io.github.DomazinUS.RaceWave46.desktop</launchable>
@@ -38,6 +39,12 @@
     <category>ActionGame</category>
   </categories>
   <releases>
+    <release version="1.1.0" date="2026-11-08">
+      <description>
+        <p>The game code is generated and compiled locally from your own ROM on first start,
+        so the package no longer contains ROM-derived code.</p>
+      </description>
+    </release>
     <release version="1.0.0" date="2026-09-16">
       <description>
         <p>First public release.</p>
