@@ -12,6 +12,14 @@ void func_80089C08(uint8_t*, recomp_context*);
 void func_80089DEC(uint8_t*, recomp_context*);
 }
 
+#ifdef WR64_GAME_MODULE
+#include "wr64_game_module.hpp"
+#define func_80089E24 (wr64::game_module::abi().func_80089E24)
+#define func_80089F28 (wr64::game_module::abi().func_80089F28)
+#define func_80089C08 (wr64::game_module::abi().func_80089C08)
+#define func_80089DEC (wr64::game_module::abi().func_80089DEC)
+#endif
+
 namespace {
 constexpr uint32_t Records = 0x801C4170;
 constexpr uint32_t RecordBytes = 0x288;

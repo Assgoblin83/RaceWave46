@@ -23,6 +23,22 @@ if(WR64_ENABLE_DIAGNOSTICS)
     add_compile_definitions(WR64_ENABLE_DIAGNOSTICS=1)
 endif()
 
+# Distributable builds ship without ROM-derived code: the host loads
+# libwr64game.so, generated from the player's own cartridge at first start.
+# When the generated sources happen to be present in the tree (developer
+# builds) the module is built alongside the host for testing.
+option(WR64_GAME_MODULE "Load the recompiled game code from a runtime-built module" OFF)
+if(WR64_GAME_MODULE)
+    if(MSVC)
+        message(FATAL_ERROR "WR64_GAME_MODULE is not supported with MSVC yet.")
+    endif()
+    file(READ "${CMAKE_SOURCE_DIR}/config/us.rev1.toml" WR64_CONFIG_TOML)
+    if(NOT WR64_CONFIG_TOML MATCHES "entrypoint[ \t]*=[ \t]*(0x[0-9A-Fa-f]+)")
+        message(FATAL_ERROR "config/us.rev1.toml has no entrypoint address.")
+    endif()
+    set(WR64_GAME_ENTRYPOINT_ADDRESS "${CMAKE_MATCH_1}")
+endif()
+
 if(WR64_ENABLE_RT64)
     if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(FATAL_ERROR "The Wave Race RT64 host supports Windows and Linux.")
@@ -184,60 +200,110 @@ file(GLOB RECOMPILED_C_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/RecompiledFuncsPoint0/funcs_*.c"
 )
 
-if(NOT RECOMPILED_C_SOURCES)
-    message(FATAL_ERROR
-        "RecompiledFuncsPoint0 is missing. Run tools/generate_code.py with your ROM before configuring CMake. See BUILDING.md."
+set(WR64_GAME_SOURCES_AVAILABLE FALSE)
+if(RECOMPILED_C_SOURCES AND EXISTS "${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp")
+    set(WR64_GAME_SOURCES_AVAILABLE TRUE)
+endif()
+
+# A distributable host is configured without any generated code. Developer
+# builds keep the checks below so a stale or mismatched generation cannot be
+# linked into a release by accident.
+if(NOT WR64_GAME_MODULE)
+    if(NOT RECOMPILED_C_SOURCES)
+        message(FATAL_ERROR
+            "RecompiledFuncsPoint0 is missing. Run tools/generate_code.py with your ROM before configuring CMake. See BUILDING.md."
+        )
+    endif()
+
+    find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/generate_code.py" --verify
+        RESULT_VARIABLE WR64_GENERATED_RESULT
+        OUTPUT_VARIABLE WR64_GENERATED_OUTPUT
+        ERROR_VARIABLE WR64_GENERATED_ERROR
+    )
+    if(NOT WR64_GENERATED_RESULT EQUAL 0)
+        message(FATAL_ERROR "${WR64_GENERATED_ERROR} See BUILDING.md.")
+    endif()
+
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp")
+        message(FATAL_ERROR
+            "rsp/aspMain.cpp is missing. Run tools/generate_code.py with your ROM before configuring CMake. See BUILDING.md."
+        )
+    endif()
+endif()
+
+if(WR64_GAME_SOURCES_AVAILABLE)
+    set(PATCHED_RSP_SOURCE "${CMAKE_BINARY_DIR}/generated/aspMain.cpp")
+    add_custom_command(
+        OUTPUT "${PATCHED_RSP_SOURCE}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/generated"
+        COMMAND "${CMAKE_COMMAND}"
+            "-DINPUT=${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp"
+            "-DOUTPUT=${PATCHED_RSP_SOURCE}"
+            -P "${CMAKE_SOURCE_DIR}/tools/patch_rsp_dispatch.cmake"
+        DEPENDS
+            "${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp"
+            "${CMAKE_SOURCE_DIR}/tools/patch_rsp_dispatch.cmake"
+        VERBATIM
+    )
+    set_source_files_properties("${PATCHED_RSP_SOURCE}" PROPERTIES
+        GENERATED TRUE
+        COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:GNU,Clang>:-msse4.1>"
     )
 endif()
 
-find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
-execute_process(
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/generate_code.py" --verify
-    RESULT_VARIABLE WR64_GENERATED_RESULT
-    OUTPUT_VARIABLE WR64_GENERATED_OUTPUT
-    ERROR_VARIABLE WR64_GENERATED_ERROR
-)
-if(NOT WR64_GENERATED_RESULT EQUAL 0)
-    message(FATAL_ERROR "${WR64_GENERATED_ERROR} See BUILDING.md.")
-endif()
+if(NOT WR64_GAME_MODULE)
+    add_library(WaveRace64RecompiledCode STATIC
+        ${RECOMPILED_C_SOURCES}
+        RecompiledFuncsPoint0/lookup.cpp
+    )
 
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp")
-    message(FATAL_ERROR
-        "rsp/aspMain.cpp is missing. Run tools/generate_code.py with your ROM before configuring CMake. See BUILDING.md."
+    target_compile_options(WaveRace64RecompiledCode PRIVATE
+        $<$<COMPILE_LANG_AND_ID:C,GNU,Clang>:-fno-strict-aliasing>
+        $<$<COMPILE_LANG_AND_ID:C,GNU,Clang>:-Wno-unused-variable>
+        $<$<COMPILE_LANG_AND_ID:C,GNU,Clang>:-Wno-implicit-function-declaration>
+    )
+
+    target_include_directories(WaveRace64RecompiledCode PRIVATE
+        RecompiledFuncsPoint0
+        lib/N64ModernRuntime/N64Recomp/include
+        lib/N64ModernRuntime/ultramodern/include
+        lib/N64ModernRuntime/librecomp/include
+    )
+elseif(WR64_GAME_SOURCES_AVAILABLE)
+    file(SHA256 "${CMAKE_SOURCE_DIR}/config/generated-code.json" WR64_GAME_RECIPE_HASH)
+    add_library(wr64game SHARED
+        ${RECOMPILED_C_SOURCES}
+        RecompiledFuncsPoint0/lookup.cpp
+        "${PATCHED_RSP_SOURCE}"
+        src/game_module/wr64_game_module_abi.cpp
+    )
+    set_target_properties(wr64game PROPERTIES
+        OUTPUT_NAME wr64game
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        PREFIX "lib"
+    )
+    target_compile_definitions(wr64game PRIVATE
+        WR64_GAME_MODULE_RECIPE_HASH="${WR64_GAME_RECIPE_HASH}"
+    )
+    target_compile_options(wr64game PRIVATE
+        $<$<COMPILE_LANG_AND_ID:C,GNU,Clang>:-fno-strict-aliasing>
+        $<$<COMPILE_LANG_AND_ID:C,GNU,Clang>:-Wno-unused-variable>
+        $<$<COMPILE_LANG_AND_ID:C,GNU,Clang>:-Wno-implicit-function-declaration>
+        # The runtime build links the module without a C++ runtime.
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
+    )
+    target_include_directories(wr64game PRIVATE
+        include
+        RecompiledFuncsPoint0
+        lib/N64ModernRuntime/N64Recomp/include
+        lib/N64ModernRuntime/ultramodern/include
+        lib/N64ModernRuntime/librecomp/include
     )
 endif()
-
-set(PATCHED_RSP_SOURCE "${CMAKE_BINARY_DIR}/generated/aspMain.cpp")
-add_custom_command(
-    OUTPUT "${PATCHED_RSP_SOURCE}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/generated"
-    COMMAND "${CMAKE_COMMAND}"
-        "-DINPUT=${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp"
-        "-DOUTPUT=${PATCHED_RSP_SOURCE}"
-        -P "${CMAKE_SOURCE_DIR}/tools/patch_rsp_dispatch.cmake"
-    DEPENDS
-        "${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp"
-        "${CMAKE_SOURCE_DIR}/tools/patch_rsp_dispatch.cmake"
-    VERBATIM
-)
-
-add_library(WaveRace64RecompiledCode STATIC
-    ${RECOMPILED_C_SOURCES}
-    RecompiledFuncsPoint0/lookup.cpp
-)
-
-target_compile_options(WaveRace64RecompiledCode PRIVATE
-    $<$<COMPILE_LANG_AND_ID:C,GNU,Clang>:-fno-strict-aliasing>
-    $<$<COMPILE_LANG_AND_ID:C,GNU,Clang>:-Wno-unused-variable>
-    $<$<COMPILE_LANG_AND_ID:C,GNU,Clang>:-Wno-implicit-function-declaration>
-)
-
-target_include_directories(WaveRace64RecompiledCode PRIVATE
-    RecompiledFuncsPoint0
-    lib/N64ModernRuntime/N64Recomp/include
-    lib/N64ModernRuntime/ultramodern/include
-    lib/N64ModernRuntime/librecomp/include
-)
 
 if(NOT EXISTS "${CMAKE_SOURCE_DIR}/data/waverace64-widescreen.ips")
     message(FATAL_ERROR "data/waverace64-widescreen.ips is missing.")
@@ -313,13 +379,21 @@ add_executable(WaveRace64Recompiled
     src/wr64_ghost_ui.cpp
     src/win32_window.cpp
     src/wr64_secondary_window.cpp
-    "${PATCHED_RSP_SOURCE}"
 )
 
-set_source_files_properties("${PATCHED_RSP_SOURCE}" PROPERTIES
-    GENERATED TRUE
-    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:GNU,Clang>:-msse4.1>"
-)
+if(NOT WR64_GAME_MODULE)
+    target_sources(WaveRace64Recompiled PRIVATE "${PATCHED_RSP_SOURCE}")
+else()
+    target_sources(WaveRace64Recompiled PRIVATE src/wr64_game_module.cpp)
+    target_compile_definitions(WaveRace64Recompiled PRIVATE
+        WR64_GAME_MODULE=1
+        WR64_ENTRYPOINT_ADDRESS=${WR64_GAME_ENTRYPOINT_ADDRESS}
+    )
+    # The module resolves the host's hooks, and the runtime objects the game
+    # code calls must survive static linking even though the host never
+    # references them itself.
+    set_target_properties(WaveRace64Recompiled PROPERTIES ENABLE_EXPORTS ON)
+endif()
 
 if(WIN32)
     target_sources(WaveRace64Recompiled PRIVATE resources/waverace.rc)
@@ -338,12 +412,19 @@ target_include_directories(WaveRace64Recompiled PRIVATE
     lib/N64ModernRuntime/librecomp/include
 )
 
-target_link_libraries(WaveRace64Recompiled PRIVATE
-    wr64_rcheevos
-    WaveRace64RecompiledCode
-    librecomp
-    ultramodern
-)
+if(WR64_GAME_MODULE)
+    target_link_libraries(WaveRace64Recompiled PRIVATE
+        wr64_rcheevos
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,librecomp,ultramodern>"
+    )
+else()
+    target_link_libraries(WaveRace64Recompiled PRIVATE
+        wr64_rcheevos
+        WaveRace64RecompiledCode
+        librecomp
+        ultramodern
+    )
+endif()
 
 if(WR64_ENABLE_RT64)
     target_sources(WaveRace64Recompiled PRIVATE
@@ -507,4 +588,20 @@ set_target_properties(WaveRace64Recompiled PROPERTIES
 if(MSVC)
     target_link_options(WaveRace64Recompiled PRIVATE
         "/MAP:${CMAKE_BINARY_DIR}/WaveRace64Recompiled.map")
+endif()
+
+if(WR64_GAME_MODULE AND WR64_GAME_SOURCES_AVAILABLE)
+    # The module is linked without libc or the C++ runtime, so only the host
+    # and the shared libraries it loads can satisfy its imports.
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_custom_target(wr64_game_module_check ALL
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_SOURCE_DIR}/tools/check_game_module_symbols.py"
+                --host "$<TARGET_FILE:WaveRace64Recompiled>"
+                --module "$<TARGET_FILE:wr64game>"
+            DEPENDS WaveRace64Recompiled wr64game
+            VERBATIM
+        )
+    endif()
 endif()

@@ -45,9 +45,13 @@
 #include "ultramodern/renderer_context.hpp"
 #include "ultramodern/ultramodern.hpp"
 
+#ifdef WR64_GAME_MODULE
+#include "wr64_game_module.hpp"
+#else
 extern "C" void recomp_entrypoint(uint8_t* rdram, recomp_context* ctx);
 extern RspUcodeFunc aspMain;
 gpr get_entrypoint_address();
+#endif
 
 namespace {
 
@@ -142,9 +146,27 @@ void show_error(const char* message) {
     std::fprintf(stderr, "[runtime] %s\n", message);
 }
 
+#ifdef WR64_GAME_MODULE
+void game_module_entrypoint(uint8_t* rdram, recomp_context* ctx) {
+    if (!wr64::game_module::loaded()) {
+        std::fprintf(stderr, "[runtime] game module is not loaded\n");
+        return;
+    }
+    wr64::game_module::abi().entrypoint(rdram, ctx);
+}
+
+RspExitReason game_module_asp_main(uint8_t* rdram, uint32_t ucode_addr) {
+    return static_cast<RspExitReason>(wr64::game_module::abi().asp_main(rdram, ucode_addr));
+}
+#endif
+
 RspUcodeFunc* get_rsp_microcode(const OSTask* task) {
     if (task->t.type == M_AUDTASK) {
+#ifdef WR64_GAME_MODULE
+        return game_module_asp_main;
+#else
         return aspMain;
+#endif
     }
     std::fprintf(stderr, "[runtime] unsupported RSP task type: %" PRIu32 "\n", task->t.type);
     return nullptr;
@@ -222,6 +244,17 @@ int main(int argc, char** argv) {
     wr64::achievements::initialize(recomp::get_config_path());
     wr64::achievement_badges::initialize(recomp::get_config_path());
 
+#ifdef WR64_GAME_MODULE
+    const char* module_env = std::getenv("WR64_GAME_MODULE_PATH");
+    const std::filesystem::path module_path =
+        module_env != nullptr && *module_env != '\0'
+            ? std::filesystem::path{module_env}
+            : wr64::game_module::default_path();
+    if (!wr64::game_module::load(module_path)) {
+        std::fprintf(stderr, "[runtime] %s\n", wr64::game_module::last_error().c_str());
+    }
+#endif
+
     recomp::GameEntry game{
         .rom_hash = kRomXxh3,
         .internal_name = "WAVE RACE 64",
@@ -236,8 +269,15 @@ int main(int argc, char** argv) {
         .save_type = recomp::SaveType::Eep4k,
         .is_enabled = true,
         .has_compressed_code = false,
+#ifdef WR64_GAME_MODULE
+        // The module is loaded before Start Game, so the address is a build
+        // constant here and the entrypoint trampolines into the module.
+        .entrypoint_address = static_cast<gpr>(static_cast<int32_t>(WR64_ENTRYPOINT_ADDRESS)),
+        .entrypoint = game_module_entrypoint,
+#else
         .entrypoint_address = get_entrypoint_address(),
         .entrypoint = recomp_entrypoint,
+#endif
         .on_init_callback = [](uint8_t*, recomp_context*) {
             wr64::achievements::native::game_initialized(recomp::get_rom());
         },
@@ -272,6 +312,12 @@ int main(int argc, char** argv) {
 #endif
 
     if (diagnostic_run) {
+#ifdef WR64_GAME_MODULE
+        if (!wr64::game_module::loaded()) {
+            std::fprintf(stderr, "Cannot start the game without a game module\n");
+            return EXIT_FAILURE;
+        }
+#endif
         std::error_code rom_error;
         const auto rom_size = std::filesystem::file_size(rom_path, rom_error);
         if (rom_error || rom_size < 64 || rom_size > 64 * 1024 * 1024) {

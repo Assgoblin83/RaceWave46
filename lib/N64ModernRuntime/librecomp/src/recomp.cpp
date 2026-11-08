@@ -944,17 +944,9 @@ void recomp::start(const recomp::Configuration& cfg) {
     // Finish it while that allocation exists, after its producers have stopped.
     wr64_forensic_shutdown();
 
-    // Free rdram.
-    bool free_failed;
-#ifdef _WIN32
-    // VirtualFree returns zero on failure.
-    free_failed = (VirtualFree(rdram, 0, MEM_RELEASE) == 0);
-#else
-    // munmap returns -1 on failure.
-    free_failed = (munmap(rdram, allocation_size) == -1);
-#endif
-
-    if (free_failed) {
-        printf("Failed to free rdram\n");
-    }
+    // Game threads stop cooperatively: quit() only stops the entrypoint
+    // thread, so a scheduled audio thread can still be inside a task here.
+    // Unmapping RDRAM at this point lets that thread fault on the released
+    // range, and the process exits immediately afterwards anyway, so leave
+    // the mapping for the kernel to reclaim.
 }

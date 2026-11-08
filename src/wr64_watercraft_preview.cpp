@@ -8,6 +8,11 @@
 
 extern "C" void func_801E9B04(uint8_t* rdram, recomp_context* ctx);
 
+#ifdef WR64_GAME_MODULE
+#include "wr64_game_module.hpp"
+#define func_801E9B04 (wr64::game_module::abi().func_801E9B04)
+#endif
+
 namespace {
 constexpr uint32_t Viewport = 0x800DA8F0;
 constexpr uint32_t WatercraftCoverageList = 0x080BE500;

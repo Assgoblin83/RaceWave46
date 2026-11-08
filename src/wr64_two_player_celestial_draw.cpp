@@ -14,6 +14,15 @@ void func_8008BD2C(uint8_t*, recomp_context*);
 void func_80051538(uint8_t*, recomp_context*);
 }
 
+#ifdef WR64_GAME_MODULE
+#include "wr64_game_module.hpp"
+#define func_8008D94C (wr64::game_module::abi().func_8008D94C)
+#define func_8008CFEC (wr64::game_module::abi().func_8008CFEC)
+#define func_8008D454 (wr64::game_module::abi().func_8008D454)
+#define func_8008BD2C (wr64::game_module::abi().func_8008BD2C)
+#define func_80051538 (wr64::game_module::abi().func_80051538)
+#endif
+
 namespace {
 constexpr uint32_t NativeDrawBudget = 0x1800;
 constexpr uint32_t WashState = 0x800D47E0;

@@ -20,6 +20,15 @@ void func_80096048(uint8_t*,recomp_context*); // native animal asset relocation
 void func_800AC098(uint8_t*,recomp_context*); // synchronous render-actor enqueue
 void func_8009FCB0(uint8_t*,recomp_context*); // native dolphin display-list builder
 }
+
+#ifdef WR64_GAME_MODULE
+#include "wr64_game_module.hpp"
+#define Mio0_Decompress (wr64::game_module::abi().Mio0_Decompress)
+#define func_80096048 (wr64::game_module::abi().func_80096048)
+#define func_800AC098 (wr64::game_module::abi().func_800AC098)
+#define func_8009FCB0 (wr64::game_module::abi().func_8009FCB0)
+#endif
+
 namespace {
 using namespace wr64::ghost;
 constexpr std::uint32_t kBoat=0x80192690,kBoatStride=0x1718;

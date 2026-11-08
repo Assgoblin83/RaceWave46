@@ -3,6 +3,11 @@
 
 extern "C" void func_800694B8(uint8_t*, recomp_context*);
 
+#ifdef WR64_GAME_MODULE
+#include "wr64_game_module.hpp"
+#define func_800694B8 (wr64::game_module::abi().func_800694B8)
+#endif
+
 namespace {
 constexpr uint32_t rdramBytes = 0x800000;
 constexpr uint32_t firstPool = 0x8011F8E8, poolBytes = 0x18FE8;

@@ -6,6 +6,11 @@
 
 extern "C" void func_800916B4(uint8_t*, recomp_context*);
 
+#ifdef WR64_GAME_MODULE
+#include "wr64_game_module.hpp"
+#define func_800916B4 (wr64::game_module::abi().func_800916B4)
+#endif
+
 namespace {
 constexpr uint32_t addressMask = 0x1FFFFFFF;
 constexpr uint32_t firstPool = 0x11F8E8, poolStride = 0x18FE8;
