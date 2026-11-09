@@ -1,21 +1,31 @@
-name: Flatpak
+name: Build
 
 # Builds the distributable Flatpak (host plus toolchain, no ROM-derived code)
-# and attaches it to the GitHub release for the tag. Run manually to try a
-# build without publishing.
+# for every push to main and every pull request. Tag builds also publish the
+# bundle to the GitHub release. Start it manually to try a build without
+# publishing.
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
-permissions:
-  contents: write
+concurrency:
+  group: flatpak-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   flatpak:
     name: Distributable Flatpak
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
     steps:
       - name: Check out the source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -52,19 +62,33 @@ jobs:
             io.github.Assgoblin83.RaceWave46 master
           ls -l RaceWave46-x86_64.flatpak
 
-      - name: Upload the Flatpak to the release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 ||
-            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
-          gh release upload "${GITHUB_REF_NAME}" RaceWave46-x86_64.flatpak --clobber
-
       - name: Keep the Flatpak as a workflow artifact
-        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: RaceWave46-x86_64-flatpak
           path: RaceWave46-x86_64.flatpak
           if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish the Flatpak release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: flatpak
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download the Flatpak
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: RaceWave46-x86_64-flatpak
+
+      - name: Upload the Flatpak to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" RaceWave46-x86_64.flatpak --clobber
