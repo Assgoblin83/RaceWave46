@@ -1,4 +1,5 @@
 #include "wr64_diagnostic_policy.h"
+#include "wr64_version.h"
 #include "wr64_achievements.hpp"
 #include "wr64_achievements_native.hpp"
 #include "wr64_achievements_platform.hpp"
@@ -595,7 +596,7 @@ void initialize(const std::filesystem::path& directory) {
     if (!service.client) { service.view.status = "RetroAchievements could not start."; return; }
     char clause[128]{};
     rc_client_get_user_agent_clause(service.client, clause, sizeof(clause));
-    service.user_agent = std::string("WaveRace64Recompiled/1.0.0 (Windows) ") + clause;
+    service.user_agent = std::string("WaveRace64Recompiled/") + WR64_VERSION_STRING + " (Windows) " + clause;
     service.log("client initialized; N64 memory view=raw host words; softcore only");
     service.status("Sign in to earn softcore achievements.");
     try {

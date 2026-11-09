@@ -169,7 +169,8 @@ HttpResponse http_request(const std::string& url, const std::string& post, const
     (catalog ? catalog_requests : requests).push_back(
         {action, user, field(post, "h"), field(post, "a"), !field(post, "t").empty(), field(post, "g")});
     if (std::this_thread::get_id() == main_thread) failure = "HTTP ran on test's native/UI thread";
-    if (url.empty() || content_type.empty() || user_agent.find("WaveRace64Recompiled/1.0.0") == std::string::npos)
+    if (url.empty() || content_type.empty() ||
+        user_agent.find(std::string("WaveRace64Recompiled/") + WR64_VERSION_STRING) == std::string::npos)
         failure = "production HTTP metadata missing";
     if (action == "ping") return {200, "{\"Success\":true}"};
     auto& plans = catalog ? catalog_expected : expected;

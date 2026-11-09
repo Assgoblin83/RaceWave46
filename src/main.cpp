@@ -28,6 +28,7 @@
 #include "wr64_window.hpp"
 #include "wr64_forensic.h"
 #include "wr64_frontend.hpp"
+#include "wr64_version.h"
 #include "wr64_input.hpp"
 #include "wr64_editions.hpp"
 #include "wr64_game_rumble.hpp"
@@ -369,7 +370,8 @@ int main(int argc, char** argv) {
     recomp::Configuration config{
         // recomp::Version has user-declared constructors in this runtime, so
         // it is not an aggregate and cannot take designated initialisers.
-        .project_version = recomp::Version{1, 0, 0},
+        .project_version = recomp::Version{
+            WR64_VERSION_MAJOR, WR64_VERSION_MINOR, WR64_VERSION_PATCH},
         .window_handle = {},
         .rsp_callbacks = rsp_callbacks,
         .renderer_callbacks = renderer_callbacks,

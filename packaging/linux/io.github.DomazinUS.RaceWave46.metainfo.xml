@@ -39,7 +39,7 @@
     <category>ActionGame</category>
   </categories>
   <releases>
-    <release version="1.1.0" date="2026-11-08">
+    <release version="1.1.0" date="2026-11-09">
       <description>
         <p>The game code is generated and compiled locally from your own ROM on first start,
         so the package no longer contains ROM-derived code.</p>

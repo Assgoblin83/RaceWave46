@@ -6,7 +6,7 @@ RaceWave46 brings the USA Rev 1 version of Wave Race 64 to modern PCs, with high
 
 The project has been under active development for many months. That time has gone into bringing up the game, revisiting its rendering and interfaces, adding enhancements, and repeatedly testing races, menus, course introductions and the championship ending. The aim is to make this classic more comfortable to play today while preserving its character.
 
-> **v1.0.0 is available now.** [Download for Windows](https://github.com/DomazinUS/RaceWave46/releases/download/v1.0.0/RaceWave46-Windows-x64-v1.0.0.zip) · [Source and release notes](https://github.com/DomazinUS/RaceWave46/releases/tag/v1.0.0).
+> **v1.1.0 is available now for Linux.** [Download the Flatpak](https://github.com/Assgoblin83/RaceWave46/releases/tag/v1.1.0) · The Windows v1.0.0 build is [available upstream](https://github.com/DomazinUS/RaceWave46/releases/tag/v1.0.0).
 
 [The original game](#the-original-game) · [Added features](#what-racewave46-adds) · [Graphics API support](#graphics-api-support) · [Getting started](#getting-started) · [AI assistance](#ai-assistance) · [Source and license](#source-and-license) · [Credits](#credits)
 

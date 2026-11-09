@@ -1,9 +1,8 @@
 name: Build
 
 # Builds the distributable Flatpak (host plus toolchain, no ROM-derived code)
-# for every push to main and every pull request. Tag builds also publish the
-# bundle to the GitHub release. Start it manually to try a build without
-# publishing.
+# for every push to main and every pull request. A v* tag, or a manual run with
+# a release version, publishes the bundle to the matching GitHub release.
 on:
   push:
     branches:
@@ -14,6 +13,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version to publish, e.g. 1.1.0 (no leading v). Leave empty to only build.'
+        required: false
+        type: string
 
 concurrency:
   group: flatpak-${{ github.ref }}
@@ -72,7 +76,7 @@ jobs:
 
   release:
     name: Publish the Flatpak release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version != '')
     needs: flatpak
     runs-on: ubuntu-24.04
     permissions:
@@ -87,8 +91,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', inputs.version) }}
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 ||
-            gh release create "$TAG" --title "$TAG" --generate-notes
-          gh release upload "$TAG" RaceWave46-x86_64.flatpak --clobber
+          set -euo pipefail
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Invalid release tag: $TAG" >&2; exit 1 ;;
+          esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" RaceWave46-x86_64.flatpak --clobber
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" \
+              --title "RaceWave46 ${TAG#v}" --generate-notes
+            gh release upload "$TAG" RaceWave46-x86_64.flatpak
+          fi
