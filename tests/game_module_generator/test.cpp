@@ -132,6 +132,16 @@ void check_builder(const std::filesystem::path& root,
     std::filesystem::path prepared;
     check(wr64::game_builder::prepared(paths, prepared), "module is reused");
     check(prepared == result.module, "reuse finds the installed module");
+
+#ifndef _WIN32
+    unsetenv("WR64_BUILDER_NO_DLOPEN");
+    {
+        std::ofstream corrupt(result.module, std::ios::binary | std::ios::trunc);
+        corrupt << "not a shared object";
+    }
+    check(!wr64::game_builder::prepared(paths, prepared),
+        "corrupt cached module is rejected");
+#endif
 }
 
 }  // namespace

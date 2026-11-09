@@ -63,8 +63,7 @@ jobs:
 
       - name: Keep the Flatpak as a workflow artifact
         if: github.event_name == 'workflow_dispatch'
-        # TODO: pin to a commit SHA once one is chosen for this repository.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: RaceWave46-x86_64-flatpak
           path: RaceWave46-x86_64.flatpak

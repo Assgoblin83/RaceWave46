@@ -19,9 +19,11 @@
 #include <Windows.h>
 #else
 #include <dlfcn.h>
+#include <spawn.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
+extern char** environ;
 #endif
 
 #include "wr64_game_module.h"
@@ -238,41 +240,95 @@ bool run_process(const std::vector<std::string>& arguments,
         error = "Cannot create a pipe for " + arguments.front();
         return false;
     }
-    const pid_t pid = fork();
-    if (pid == 0) {
+    posix_spawn_file_actions_t file_actions;
+    int spawn_error = posix_spawn_file_actions_init(&file_actions);
+    if (spawn_error != 0) {
         close(pipe_fds[0]);
-        dup2(pipe_fds[1], STDOUT_FILENO);
-        dup2(pipe_fds[1], STDERR_FILENO);
         close(pipe_fds[1]);
-        if (!working_directory.empty()) {
-            if (chdir(working_directory.c_str()) != 0) {
-                _exit(127);
-            }
-        }
-        for (const std::string& entry : environment) {
-            const size_t separator = entry.find('=');
-            if (separator != std::string::npos) {
-                setenv(entry.substr(0, separator).c_str(),
-                    entry.substr(separator + 1).c_str(), 1);
-            }
-        }
-        if (priority != 0) {
-            setpriority(PRIO_PROCESS, 0, priority);
-        }
-        std::vector<char*> argv;
-        argv.reserve(arguments.size() + 1);
-        for (const std::string& argument : arguments) {
-            argv.push_back(const_cast<char*>(argument.c_str()));
-        }
-        argv.push_back(nullptr);
-        execvp(argv.front(), argv.data());
-        _exit(127);
-    }
-    close(pipe_fds[1]);
-    if (pid < 0) {
-        close(pipe_fds[0]);
-        error = "Cannot start " + arguments.front();
+        error = "Cannot prepare " + arguments.front() + ": " +
+            std::strerror(spawn_error);
         return false;
+    }
+
+    int action_error = posix_spawn_file_actions_addclose(&file_actions, pipe_fds[0]);
+    if (action_error == 0) {
+        action_error = posix_spawn_file_actions_adddup2(
+            &file_actions, pipe_fds[1], STDOUT_FILENO);
+    }
+    if (action_error == 0) {
+        action_error = posix_spawn_file_actions_adddup2(
+            &file_actions, pipe_fds[1], STDERR_FILENO);
+    }
+    if (action_error == 0 && pipe_fds[1] != STDOUT_FILENO &&
+        pipe_fds[1] != STDERR_FILENO) {
+        action_error = posix_spawn_file_actions_addclose(&file_actions, pipe_fds[1]);
+    }
+    if (action_error == 0 && !working_directory.empty()) {
+        action_error = posix_spawn_file_actions_addchdir_np(
+            &file_actions, working_directory.c_str());
+    }
+    if (action_error != 0) {
+        posix_spawn_file_actions_destroy(&file_actions);
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        error = "Cannot prepare " + arguments.front() + ": " +
+            std::strerror(action_error);
+        return false;
+    }
+
+    std::map<std::string, std::string> overrides;
+    for (const std::string& entry : environment) {
+        const size_t separator = entry.find('=');
+        if (separator != std::string::npos) {
+            overrides[entry.substr(0, separator)] = entry.substr(separator + 1);
+        }
+    }
+    std::vector<std::string> child_environment;
+    for (char** entry = environ; entry != nullptr && *entry != nullptr; ++entry) {
+        const std::string_view value{*entry};
+        const size_t separator = value.find('=');
+        if (separator == std::string_view::npos) {
+            child_environment.emplace_back(value);
+            continue;
+        }
+        const auto override = overrides.find(std::string(value.substr(0, separator)));
+        if (override == overrides.end()) {
+            child_environment.emplace_back(value);
+        } else {
+            child_environment.push_back(override->first + "=" + override->second);
+            overrides.erase(override);
+        }
+    }
+    for (const auto& [name, value] : overrides) {
+        child_environment.push_back(name + "=" + value);
+    }
+
+    std::vector<char*> argv;
+    argv.reserve(arguments.size() + 1);
+    for (const std::string& argument : arguments) {
+        argv.push_back(const_cast<char*>(argument.c_str()));
+    }
+    argv.push_back(nullptr);
+    std::vector<char*> envp;
+    envp.reserve(child_environment.size() + 1);
+    for (std::string& entry : child_environment) {
+        envp.push_back(entry.data());
+    }
+    envp.push_back(nullptr);
+
+    pid_t pid = -1;
+    spawn_error = posix_spawnp(&pid, argv.front(), &file_actions, nullptr,
+        argv.data(), envp.data());
+    posix_spawn_file_actions_destroy(&file_actions);
+    close(pipe_fds[1]);
+    if (spawn_error != 0) {
+        close(pipe_fds[0]);
+        error = "Cannot start " + arguments.front() + ": " +
+            std::strerror(spawn_error);
+        return false;
+    }
+    if (priority != 0) {
+        setpriority(PRIO_PROCESS, pid, priority);
     }
     char buffer[4096];
     ssize_t count = 0;
@@ -498,7 +554,15 @@ bool validate_module(const std::filesystem::path& module, const std::string& rec
     bool valid = entry != nullptr;
     const Wr64GameModule* abi = entry != nullptr ? entry() : nullptr;
     if (!valid || abi == nullptr || abi->abi_version != WR64_GAME_MODULE_ABI_VERSION ||
-        abi->recipe_hash == nullptr || abi->recipe_hash != recipe_hash) {
+        abi->struct_size < sizeof(Wr64GameModule) || abi->recipe_hash == nullptr ||
+        abi->recipe_hash != recipe_hash || abi->entrypoint == nullptr ||
+        abi->asp_main == nullptr || abi->code_sections == nullptr ||
+        abi->overlay_table == nullptr
+#ifdef WR64_ENTRYPOINT_ADDRESS
+        || abi->entrypoint_address !=
+            static_cast<gpr>(static_cast<int32_t>(WR64_ENTRYPOINT_ADDRESS))
+#endif
+        ) {
         error = "The game module does not match this release";
         valid = false;
     }
@@ -628,7 +692,8 @@ bool prepared(const Paths& paths, std::filesystem::path& module) {
     const std::filesystem::path candidate = directory / kModuleName;
     std::error_code ignored;
     if (!std::filesystem::is_regular_file(candidate, ignored) ||
-        !record_matches(directory / kRecordName, recipe_hash, compiler)) {
+        !record_matches(directory / kRecordName, recipe_hash, compiler) ||
+        !validate_module(candidate, recipe_hash, error)) {
         return false;
     }
     module = candidate;
@@ -687,7 +752,8 @@ Result build(const Paths& paths, const Progress& progress) {
     const std::filesystem::path final_directory = paths.data_directory / key;
     const std::filesystem::path final_module = final_directory / kModuleName;
     if (std::filesystem::is_regular_file(final_module) &&
-        record_matches(final_directory / kRecordName, recipe_hash, compiler)) {
+        record_matches(final_directory / kRecordName, recipe_hash, compiler) &&
+        validate_module(final_module, recipe_hash, error)) {
         report(100, "Ready");
         result.ok = true;
         result.module = final_module;
