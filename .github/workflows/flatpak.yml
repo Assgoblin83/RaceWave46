@@ -1,17 +1,12 @@
 name: Build
 
 # Builds the distributable Flatpak (host plus toolchain, no ROM-derived code)
-# for every push to main and every pull request. A v* tag, or a manual run with
-# a release version, publishes the bundle to the matching GitHub release.
+# only when asked: a manual run, or a pushed v* tag. A v* tag, or a manual run
+# with a release version, publishes the bundle to the matching GitHub release.
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       version:
@@ -21,7 +16,7 @@ on:
 
 concurrency:
   group: flatpak-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   flatpak:

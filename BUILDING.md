@@ -103,4 +103,4 @@ flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakr
 
 The build log for the in-app preparation is written to `game-module/game-module-build.log` in the profile (normally `~/.var/app/io.github.Assgoblin83.RaceWave46/data/racewave46`). A failed preparation shows the reason in the dialog and leaves that log for diagnosis; **Prepare Game** can be retried.
 
-`.github/workflows/flatpak.yml` builds this package on every push to `main`, every pull request and every `v*` tag. Tag builds, and manual runs with a release version, publish the bundle to the matching GitHub release; other builds keep it as a workflow artifact. The workflow runs the content check before uploading.
+`.github/workflows/flatpak.yml` builds this package only on demand: a manual run (**Actions → Build → Run workflow**, or `gh workflow run flatpak.yml`) or a pushed `v*` tag. Pushes to `main` and pull requests do not start a build. Tag builds, and manual runs with a release version, publish the bundle to the matching GitHub release; other builds keep it as a workflow artifact. The workflow runs the content check before uploading.
