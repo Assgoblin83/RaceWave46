@@ -39,6 +39,13 @@
     <category>ActionGame</category>
   </categories>
   <releases>
+    <release version="1.1.1" date="2026-11-17">
+      <description>
+        <p>Rumble no longer leaves some controllers' motors running, and low rumble
+        strength settings keep working.</p>
+        <p>Opening the Achievements page no longer crashes the game.</p>
+      </description>
+    </release>
     <release version="1.1.0" date="2026-11-09">
       <description>
         <p>The game code is generated and compiled locally from your own ROM on first start,
